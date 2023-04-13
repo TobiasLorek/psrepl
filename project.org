@@ -1,0 +1,13 @@
+#+title: An Powershell Repl for Emacs usign the Windows terminal
+
+The aim of this project is to setup functionality to let emacs interact with powershell running in Windows Terminal.
+1. [ ] Send input to a running Windows Terminal with an powershell shell.
+2. [ ] Use `eval/send-reigon-to-repl` to send text to a WT Powershell repl
+3. [ ] Set breakpoints in the WT PS Repl using the current location in the file
+4. [ ] Import the file into the WT PS Repl
+
+ The Non-Goals of this project are:
+5. To write  a pure elisp plugin.
+6. To be completely selfcontained. It is ok if some manual tweaking is required every time you run it.
+
+* Sending lines to a running powershell process in windows terminal
