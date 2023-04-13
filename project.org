@@ -11,3 +11,384 @@ The aim of this project is to setup functionality to let emacs interact with pow
 6. To be completely selfcontained. It is ok if some manual tweaking is required every time you run it.
 
 * Sending lines to a running powershell process in windows terminal
+I am hoping this is possible using powershell, so lets ask the AI to write it for us.
+
+#+begin_ai
+[SYS]: You are a powershell developer
+
+[ME]: Hi. Write a powershell function that writes an array of strings to the console of an other running powershell instance. The function should take an array of strings and an integer with the PID to the other powershell process as input. It should aquire the stdin handle to the powershell process and post the strings in the array one by one. Then it should release the stdin handle and detach from the process.
+
+[AI]: Sure, here's an example function that should do what you're asking for:
+
+```
+function Send-StringsToProcess {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)]
+        [string[]]$StringsToSend,
+
+        [Parameter(Mandatory = $true)]
+        [int]$ProcessId
+    )
+
+    Begin {
+        $psi = New-Object System.Diagnostics.ProcessStartInfo
+        $psi.FileName = "powershell.exe"
+        $psi.RedirectStandardInput = $true
+        $psi.UseShellExecute = $false
+        $process = [System.Diagnostics.Process]::GetProcessById($ProcessId)
+    }
+    
+    Process {
+        foreach ($string in $StringsToSend) {
+            $processStdIn = $process.StandardInput
+            $processStdIn.WriteLine($string)
+        }
+    }
+
+    End {
+        $processStdIn.Close()
+        $processStdIn.Dispose()
+    }
+}
+```
+
+Here's how you can use the function:
+
+1. Get the process Id of the other PowerShell process that you want to send the strings to. You can do this by opening Task Manager, right-clicking on the PowerShell process, and selecting "Go to details". The process Id is listed under the "Details" tab.
+
+2. Open a PowerShell console and call the `Send-StringsToProcess` function with the array of strings you want to send and the process Id of the other PowerShell process:
+
+```
+$strings = @("String 1", "String 2", "String 3")
+Send-StringsToProcess -StringsToSend $strings -ProcessId <other PowerShell process Id>
+```
+
+This should write each string in the array to the other PowerShell process's console window one by one.
+
+Note that the other PowerShell process must be running as an interactive console application for this to work. If it's running in a non-interactive mode, such as from a scheduled task or Windows service, it won't have a stdin handle that can be written to.
+
+[ME]: Thanks!
+
+[AI]: You're welcome! Let me know if you have any other PowerShell questions or needs.
+
+[ME]: Oh, and the script should be able to pick up the strings as command line arguments
+
+[AI]: Sure, no problem. Here is an updated version of the `Send-StringsToProcess` function that can accept strings as command line arguments:
+
+```
+function Send-StringsToProcess {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true, Position = 0, ValueFromPipeline = $true)]
+        [string[]]$StringsToSend,
+
+        [Parameter(Mandatory = $true, Position = 1)]
+        [int]$ProcessId
+    )
+
+    Begin {
+        $psi = New-Object System.Diagnostics.ProcessStartInfo
+        $psi.FileName = "powershell.exe"
+        $psi.RedirectStandardInput = $true
+        $psi.UseShellExecute = $false
+        $process = [System.Diagnostics.Process]::GetProcessById($ProcessId)
+    }
+    
+    Process {
+        $strings = $StringsToSend[0].Split(" ")
+        foreach ($string in $strings) {
+            $processStdIn = $process.StandardInput
+            $processStdIn.WriteLine($string)
+        }
+    }
+
+    End {
+        $processStdIn.Close()
+        $processStdIn.Dispose()
+    }
+}
+```
+
+This updated function accepts input from the pipeline and splits the strings on white space to generate an array of strings that you can use to send to the other PowerShell process. Here is an example of how you can use the updated function:
+
+`"Hello World" | Send-StringsToProcess -ProcessId <other PowerShell process Id>`
+
+This example sends the string "Hello World" to the other PowerShell process. 
+
+You can also use the `-StringsToSend` parameter as before:
+
+```
+Send-StringsToProcess -StringsToSend "Hello World" -ProcessId <other PowerShell process Id>
+```
+
+This example also sends the string "Hello World" to the other PowerShell process. 
+
+Note that the same caveat applies as before regarding the other PowerShell process needing to be running as an interactive console application.
+
+[ME]:
+#+end_ai
+
+Well that does look promising but I think it will require some tweaking to get it working.
+
+#+begin_src powershell :tangle WriteToPsRepl.ps1
+function Send-StringsToProcess {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true, Position = 0, ValueFromPipeline = $true)]
+        [string[]]$StringsToSend,
+
+        [Parameter(Mandatory = $true, Position = 1)]
+        [int]$ProcessId
+    )
+
+    Begin {
+        $psi = New-Object System.Diagnostics.ProcessStartInfo
+        $psi.FileName = "powershell.exe"
+        $psi.RedirectStandardInput = $true
+        $psi.UseShellExecute = $false
+        $process = [System.Diagnostics.Process]::GetProcessById($ProcessId)
+    }
+
+    Process {
+        $strings = $StringsToSend[0].Split(" ")
+        foreach ($string in $strings) {
+            $processStdIn = $process.StandardInput
+            $processStdIn.WriteLine($string)
+        }
+    }
+
+    End {
+        $processStdIn.Close()
+        $processStdIn.Dispose()
+    }
+}
+#+end_src
+
+* Use `eval/send-reigon-to-repl` to send text to a WT Powershell repl
+Ok, next up we need to send it some data. But first I think we need to store the PID somewhere.
+
+#+begin_ai
+[SYS]: You are an elisp developer
+
+[ME]: Write an elisp function with stores the value if PID in the variable psrepl/pid so that it can be accessible by other functions
+
+[AI]: Here is an elisp function that stores the value of PID in the variable `psrepl/pid`:
+
+```elisp
+(defun psrepl/set-pid (pid)
+  "Set PID as the psrepl process ID."
+  (setq psrepl/pid pid))
+```
+
+This function takes one argument `pid` and sets it as the value of the variable `psrepl/pid`. You can call this function from other functions to store the value of PID, making it easily accessible for other parts of your code.
+
+[ME]: Thanks
+#+end_ai
+
+Alright. With that taken care we need a function that can call the powershell script, with the PID and send a list of strings to it.
+
+#+begin_ai
+[SYS]: You are an elisp developer
+
+[ME]: Write me an elisp function which takes a list of strings and invokes the powershell script WriteToPsRepl.ps1 passing the strings as arguments. If possible we should not wait for it to finish
+
+[AI]: Here's an elisp function that takes a list of strings and invokes the `WriteToPsRepl.ps1` PowerShell script passing the strings as arguments without waiting for it to finish:
+
+```elisp
+(defun run-ps-script-async (args)
+  "Invoke a PowerShell script asynchronously, passing ARGS as arguments."
+  (let* ((script "path/to/WriteToPsRepl.ps1")
+         (cmd (format "powershell.exe -File \"%s\" %s" script
+                      (mapconcat 'identity args " "))))
+    (async-start-process "powershell" "powershell" nil cmd)))
+```
+
+To use this function, simply call it with a list of strings:
+
+```elisp
+(run-ps-script-async '("arg1" "arg2" "arg3"))
+``` 
+
+This will start the PowerShell process asynchronously and execute the script in the background passing the given arguments.
+
+[ME]: Thanks
+#+end_ai
+
+Ok, we are making progress! Next up, and this i suspect will be difficult, is to hijack the eval/send-region-to-repl to use our function instead.
+
+#+begin_ai
+[SYS]: You are an elisp developer
+
+[ME]: I need to change the behavior of the function eval/send-reigon-to-repl so that it send the lines as a list of strings to the function psrepl/send-to-powershell. But only when the major mode is powershell-mode
+
+[AI]: You can modify the behavior of the `eval/send-region-to-repl` function in Emacs Lisp to suit your needs by defining an advice function that intercepts the call to this function and modifies its behavior based on the current major mode.
+
+Here's an example advice function that you can use to achieve the desired behavior:
+
+``` emacs-lisp
+(defun my/eval-region-to-powershell (orig-fun &rest args)
+  "Advice function to modify behavior of `eval/send-region-to-repl'.
+
+   This function intercepts the call to `eval/send-region-to-repl' and
+   modifies its behavior to send the lines as a list of strings to the
+   function `psrepl/send-to-powershell' only when the major mode is
+   `powershell-mode'. Otherwise, it delegates to the original function."
+  (if (eq major-mode 'powershell-mode)
+      (let ((region-str (buffer-substring-no-properties
+                         (region-beginning) (region-end))))
+        (psrepl/send-to-powershell (split-string region-str "\n")))
+    (apply orig-fun args)))
+```
+
+This advice function checks if the current major mode is `powershell-mode`. If it is, then it retrieves the region text and sends each line as a separate string to the `psrepl/send-to-powershell` function using the `split-string` function to split the region text into a list of lines. Otherwise, it delegates to the original function.
+
+You can use this function by adding the advice to the `eval/send-region-to-repl` function:
+
+``` emacs-lisp
+(advice-add 'eval/send-region-to-repl :around #'my/eval-region-to-powershell)
+```
+
+This will modify the behavior of the `eval/send-region-to-repl` function to behave as you intended only when the major mode is `powershell-mode`.
+
+[ME]: Thanks!
+
+[AI]: You're welcome! Let me know if you have any further questions or need further assistance.
+
+[ME]: 
+#+end_ai
+
+
+Ok, It looks like we are almost there! all in about 30 minutes using ChatGPT
+
+* Working with scripts. Setting breakpoints and inclusing them
+Ok, so next up it setting breakpoints and including the script source. This should be fairly straight forward. For the break point we need the current line and the script name. Then we just send the string "Set-PSBreakPoint -Line 'current line' -Script 'current file'"
+Including the file is even simpler. Just send the string ". path-to-script.ps"
+
+#+begin_ai
+[SYS]: You are an elisp developer
+
+[ME]: Write me an elisp function called psrepl/set-breakpoint which takes a line number, called `linenum` and a filename called `filename` as arguments and the calls the function
+psrepl/send-to-powershell with a list containing the single string "Set-PSBreakpoint -Line `linenum` -Script `filename`"
+
+[AI]: Here's an implementation of `psrepl/set-breakpoint` function:
+
+```elisp
+(defun psrepl/set-breakpoint (linenum filename)
+  "Sets a breakpoint at LINENUM in FILENAME using `Set-PSBreakpoint` cmdlet."
+  (psrepl/send-to-powershell
+   (list (format "Set-PSBreakpoint -Line %d -Script \"%s\"" linenum filename))))
+```
+
+This function simply formats the `Set-PSBreakpoint` cmdlet using the given `linenum` and `filename` arguments, and sends it to the PowerShell REPL using `psrepl/send-to-powershell` function. 
+
+You can use this function like this:
+
+```elisp
+(psrepl/set-breakpoint 42 "myscript.ps1")
+```
+
+This will set a breakpoint at line 42 of `myscript.ps1` file.
+
+[ME]: Thats create. Now write me a new elisp function called psrepl/set-breakpoint-here which calles psrepl/set-breakpoint with the cursors line number as `linenum` and the current file as `filename`
+
+[AI]: Sure, here's the implementation of `psrepl/set-breakpoint-here` function that uses `psrepl/set-breakpoint` function internally:
+
+```elisp
+(defun psrepl/set-breakpoint-here ()
+  "Sets a breakpoint at the current cursor position in the current buffer using `Set-PSBreakpoint` cmdlet."
+  (interactive)
+  (let ((linenum (line-number-at-pos))
+        (filename (buffer-file-name)))
+    (when filename
+      (psrepl/set-breakpoint linenum filename))))
+```
+
+This function first gets the current line number using `line-number-at-pos` function, and the current file name using `buffer-file-name` function. If the file name is not `nil`, it calls `psrepl/set-breakpoint` with these arguments.
+
+You can bind this function to a keybinding in your Emacs configuration file like this:
+
+```elisp
+(global-set-key (kbd "C-c C-b") #'psrepl/set-breakpoint-here)
+```
+
+This binds the `psrepl/set-breakpoint-here` function to the `C-c C-b` keybinding, so you can use it to set breakpoints quickly.
+
+[ME]: Alright. Finally, write me an emacs function with calls psrepl/send-to-powershell with a list containing only one string `. filepath` where filepath is the full path to the current file
+
+[AI]: Sure, here's the implementation of `psrepl/open-current-file` function that uses `psrepl/send-to-powershell` function to open the current file in the PowerShell REPL:
+
+```elisp
+(defun psrepl/open-current-file ()
+  "Opens the current file in the PowerShell REPL using `.` operator."
+  (interactive)
+  (let ((filename (buffer-file-name)))
+    (when filename
+      (psrepl/send-to-powershell (list (concat ". \"" filename "\""))))))
+```
+
+This function first gets the full path of the current file using `buffer-file-name` function. If the file name is not `nil`, it calls `psrepl/send-to-powershell` with a list containing the full path of the file enclosed in `.` operator.
+
+You can bind this function to a keybinding in your Emacs configuration file like this:
+
+```elisp
+(global-set-key (kbd "C-c C-o") #'psrepl/open-current-file)
+```
+
+This binds the `psrepl/open-current-file` function to the `C-c C-o` keybinding, so you can use it to quickly open the current file in the PowerShell REPL.
+
+[ME]: Thanks!
+
+[AI]: You're welcome! Let me know if you need any other help.
+
+#+end_ai
+
+
+* Putting it all together
+Ok, so it looks like we got a pretty solid start for a script here minor plugin here. Putting it all together,
+
+
+#+begin_src elisp :tangle psrepl.el
+(defun psrepl/send-to-powershell (args)
+  "Invoke a PowerShell script asynchronously, passing ARGS as arguments."
+  (let* ((script "path/to/WriteToPsRepl.ps1")
+         (cmd (format "powershell.exe -File \"%s\" %s" script
+                      (mapconcat 'identity args " "))))
+    (async-start-process "powershell" "powershell" nil cmd)))
+
+(defun my/eval-region-to-powershell (orig-fun &rest args)
+  "Advice function to modify behavior of `eval/send-region-to-repl'.
+
+   This function intercepts the call to `eval/send-region-to-repl' and
+   modifies its behavior to send the lines as a list of strings to the
+   function `psrepl/send-to-powershell' only when the major mode is
+   `powershell-mode'. Otherwise, it delegates to the original function."
+  (if (eq major-mode 'powershell-mode)
+      (let ((region-str (buffer-substring-no-properties
+                         (region-beginning) (region-end))))
+        (psrepl/send-to-powershell (split-string region-str "\n")))
+    (apply orig-fun args)))
+
+(defun psrepl/set-breakpoint (linenum filename)
+  "Sets a breakpoint at LINENUM in FILENAME using `Set-PSBreakpoint` cmdlet."
+  (psrepl/send-to-powershell
+   (list (format "Set-PSBreakpoint -Line %d -Script \"%s\"" linenum filename))))
+
+(defun psrepl/set-breakpoint-here ()
+  "Sets a breakpoint at the current cursor position in the current buffer using `Set-PSBreakpoint` cmdlet."
+  (interactive)
+  (let ((linenum (line-number-at-pos))
+        (filename (buffer-file-name)))
+    (when filename
+      (psrepl/set-breakpoint linenum filename))))
+
+(defun psrepl/open-current-file ()
+  "Opens the current file in the PowerShell REPL using `.` operator."
+  (interactive)
+  (let ((filename (buffer-file-name)))
+    (when filename
+      (psrepl/send-to-powershell (list (concat ". \"" filename "\""))))))
+
+(global-set-key (kbd "C-c C-o") #'psrepl/open-current-file)
+(global-set-key (kbd "C-c C-b") #'psrepl/set-breakpoint-here)
+#+end_src
