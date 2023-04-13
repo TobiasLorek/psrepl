@@ -13,7 +13,7 @@ The aim of this project is to setup functionality to let emacs interact with pow
 * Sending lines to a running powershell process in windows terminal
 I am hoping this is possible using powershell, so lets ask the AI to write it for us.
 
-#+begin_ai
+#+begin_src markdown
 [SYS]: You are a powershell developer
 
 [ME]: Hi. Write a powershell function that writes an array of strings to the console of an other running powershell instance. The function should take an array of strings and an integer with the PID to the other powershell process as input. It should aquire the stdin handle to the powershell process and post the strings in the array one by one. Then it should release the stdin handle and detach from the process.
@@ -126,8 +126,7 @@ This example also sends the string "Hello World" to the other PowerShell process
 
 Note that the same caveat applies as before regarding the other PowerShell process needing to be running as an interactive console application.
 
-[ME]:
-#+end_ai
+#+end_src
 
 Well that does look promising but I think it will require some tweaking to get it working.
 
@@ -168,7 +167,7 @@ function Send-StringsToProcess {
 * Use `eval/send-reigon-to-repl` to send text to a WT Powershell repl
 Ok, next up we need to send it some data. But first I think we need to store the PID somewhere.
 
-#+begin_ai
+#+begin_src markdown
 [SYS]: You are an elisp developer
 
 [ME]: Write an elisp function with stores the value if PID in the variable psrepl/pid so that it can be accessible by other functions
@@ -184,11 +183,11 @@ Ok, next up we need to send it some data. But first I think we need to store the
 This function takes one argument `pid` and sets it as the value of the variable `psrepl/pid`. You can call this function from other functions to store the value of PID, making it easily accessible for other parts of your code.
 
 [ME]: Thanks
-#+end_ai
+#+end_src
 
 Alright. With that taken care we need a function that can call the powershell script, with the PID and send a list of strings to it.
 
-#+begin_ai
+#+begin_src markdown
 [SYS]: You are an elisp developer
 
 [ME]: Write me an elisp function which takes a list of strings and invokes the powershell script WriteToPsRepl.ps1 passing the strings as arguments. If possible we should not wait for it to finish
@@ -213,11 +212,11 @@ To use this function, simply call it with a list of strings:
 This will start the PowerShell process asynchronously and execute the script in the background passing the given arguments.
 
 [ME]: Thanks
-#+end_ai
+#+end_src
 
 Ok, we are making progress! Next up, and this i suspect will be difficult, is to hijack the eval/send-region-to-repl to use our function instead.
 
-#+begin_ai
+#+begin_src markdown
 [SYS]: You are an elisp developer
 
 [ME]: I need to change the behavior of the function eval/send-reigon-to-repl so that it send the lines as a list of strings to the function psrepl/send-to-powershell. But only when the major mode is powershell-mode
@@ -256,7 +255,7 @@ This will modify the behavior of the `eval/send-region-to-repl` function to beha
 [AI]: You're welcome! Let me know if you have any further questions or need further assistance.
 
 [ME]: 
-#+end_ai
+#+end_src
 
 
 Ok, It looks like we are almost there! all in about 30 minutes using ChatGPT
@@ -265,7 +264,7 @@ Ok, It looks like we are almost there! all in about 30 minutes using ChatGPT
 Ok, so next up it setting breakpoints and including the script source. This should be fairly straight forward. For the break point we need the current line and the script name. Then we just send the string "Set-PSBreakPoint -Line 'current line' -Script 'current file'"
 Including the file is even simpler. Just send the string ". path-to-script.ps"
 
-#+begin_ai
+#+begin_src markdown
 [SYS]: You are an elisp developer
 
 [ME]: Write me an elisp function called psrepl/set-breakpoint which takes a line number, called `linenum` and a filename called `filename` as arguments and the calls the function
@@ -341,7 +340,7 @@ This binds the `psrepl/open-current-file` function to the `C-c C-o` keybinding, 
 
 [AI]: You're welcome! Let me know if you need any other help.
 
-#+end_ai
+#+end_src
 
 
 * Putting it all together
