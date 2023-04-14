@@ -1,4 +1,4 @@
-#+title: An Powershell Repl for Emacs usign the Windows terminal
+#+title: An Powershell Repl for Emacs using the Windows terminal
 
 The aim of this project is to setup functionality to let emacs interact with powershell running in Windows Terminal.
 1. [ ] Send input to a running Windows Terminal with an powershell shell.
@@ -8,7 +8,7 @@ The aim of this project is to setup functionality to let emacs interact with pow
 
  The Non-Goals of this project are:
 5. To write  a pure elisp plugin.
-6. To be completely selfcontained. It is ok if some manual tweaking is required every time you run it.
+6. To be completely self contained. It is ok if some manual tweaking is required every time you run it.
 
 * First Iteration
 ** Sending lines to a running powershell process in windows terminal
@@ -165,7 +165,7 @@ function Send-StringsToProcess {
 }
 #+end_src
 
-** Use `eval/send-reigon-to-repl` to send text to a WT Powershell repl
+** Use `eval/send-region-to-repl` to send text to a WT Powershell repl
 Ok, next up we need to send it some data. But first I think we need to store the PID somewhere.
 
 #+begin_src markdown
@@ -394,7 +394,7 @@ Ok, so it looks like we got a pretty solid start for a script here minor plugin 
 Now, there are some obvious errors in the powershell script and, honestly, I dont really know elisp at all. So next up, before trying to wrap my head agains the elisp debugger. I think we should ask ChatGPT to review its code.#
 
 ** Powershell Review
-#+begin_src markdown
+#+begin_ai
 [SYS]: You are a senior powershell developer
 
 [ME]: Hi! Please review the following code bellow, give a detailed explenation for each part and comment any bugs or incorrect parts.
@@ -455,14 +455,14 @@ function Send-StringsToProcess {
 There are no major issues with the code, however, `$StringsToSend[0]` may not be what was intended, as it only sends the first element of the input string array. Also, it might be useful to add some error handling if the process cannot be found by the specified ID or if the standard input channel cannot be accessed.
 
 [ME]: 
-#+end_src
+#+end_ai
 
 Ok. I expected it to give some comment about the entierly redundant =$psi= variable. Thats not super encouraging. It is correct about that weired indexing, but its not super useful.
 
 ** Elisp Review
 Lets ask for a review of the elisp module we produced
 
-#+begin_src markdown
+#+begin_ai
 [SYS]: You are an expert elisp developer
 
 [ME]: Hi. Explain the following elisp code line by line and point out any errors.
@@ -593,11 +593,11 @@ These lines bind the functions defined above to the key sequences `C-c C-o` and 
 I don't see any errors in these lines.
 
 [ME]: 
-#+end_src
+#+end_ai
 
 The only things that stands out here is that any quotation marks  in the lines sent to powershell will break the formatting in the elisp function. This should be solvable using some encoding scheme.
 
-#+begin_src markdown
+#+begin_ai
 [SYS]: You are an expert software developer
 
 [ME]: Hi, how much does the size increase when you encode a string usign base64 encoding?
@@ -605,11 +605,11 @@ The only things that stands out here is that any quotation marks  in the lines s
 [AI]: When you encode a string using base64 encoding, the resulting encoded string size will be approximately 33% larger than the original string size. This happens because base64 encoding converts every 3 bytes of input data into 4 bytes of output data. So, the encoded string will have more characters than the original string, but it will contain the same information. For instance, if the original string has 100 bytes, the base64-encoded string will be approximately 133 bytes.
 
 [ME]: 
-#+end_src
+#+end_ai
 
 Sounds acceptable
 
-#+begin_src markdown
+#+begin_ai
 [SYS]: You are an expert software developer
 
 [ME]: Rewrite the following elisp function psrepl/send-to-powershell. It should encode the strings using base64 encodings before sending them to the powershell script
@@ -688,10 +688,10 @@ The changes I made are:
 - Passed the `-ExecutionPolicy Bypass` option to bypass the execution policy in PowerShell.
 
 [ME]: 
-#+end_src
+#+end_ai
 
 
-#+begin_src markdown
+#+begin_ai
 
 [SYS]: You are an elite software developer
 
@@ -811,9 +811,11 @@ This modified version reads the command-line arguments using `[System.Environmen
 
 Inside the `Send-StringsToProcess` function, each encoded string is first decoded using the `FromBase64String` method of the `System.Convert` class. The decoded string is then split into an array of space-separated strings and sent to the PowerShell process using the `WriteLine` method of the `StandardInput` property.
 
-[ME]: Thanks! But it seems to me that the $psi variable is useless, why is it included?
+[ME]: Thanks! But it seems to me that the $psi variable is useless, why is it included? Also, there is no need to split the decoded string. I want it written in full to the console.
 
-[AI]: You are correct, the `$psi` variable is not used in this script and can be safely removed without affecting its functionality. It looks like it was left over from an earlier version of the script where it was probably used to set additional process start options. Thank you for identifying this unnecessary variable, and here is the updated script without it:
+[AI]: You're correct that the `$psi` variable isn't necessary in this case because we're using the default `powershell.exe` executable. The original script may have included it for the sake of completeness.
+
+Regarding splitting the decoded string, you're right that it's unnecessary if you want to send the entire decoded string to the console. Here's the modified `Send-StringsToProcess` function that does not split the decoded string:
 
 ```powershell
 function Send-StringsToProcess {
@@ -833,11 +835,8 @@ function Send-StringsToProcess {
     Process {
         foreach ($stringToSend in $StringsToSend) {
             $decodedString = [System.Text.Encoding]::Unicode.GetString([System.Convert]::FromBase64String($stringToSend))
-            $strings = $decodedString.Split(" ")
-            foreach ($string in $strings) {
-                $processStdIn = $process.StandardInput
-                $processStdIn.WriteLine($string)
-            }
+            $processStdIn = $process.StandardInput
+            $processStdIn.WriteLine($decodedString)
         }
     }
 
@@ -846,18 +845,12 @@ function Send-StringsToProcess {
         $processStdIn.Dispose()
     }
 }
+```
 
-$arguments = [System.Environment]::GetCommandLineArgs()
-$arguments = $arguments[1..($arguments.Length - 1)]
-Send-StringsToProcess -StringsToSend $arguments -ProcessId $pid
-``` 
-
-I apologize for any confusion caused by the unnecessary variable, and thank you for bringing it to my attention.
+This modified version simply sends the decoded string as a whole to the PowerShell process using `WriteLine`.
 
 [ME]: 
-#+end_src
-
-Ok, I have to say i feel rather content. There has been some back and forth, but all in all its been a bliss, no digging through documentation that I dont understand or any of that. Time to see if it actually works:)
+#+end_ai
 
 #+begin_src powershell :tangle WriteToPsRepl.ps1
 function Send-StringsToProcess {
@@ -877,11 +870,8 @@ function Send-StringsToProcess {
     Process {
         foreach ($stringToSend in $StringsToSend) {
             $decodedString = [System.Text.Encoding]::Unicode.GetString([System.Convert]::FromBase64String($stringToSend))
-            $strings = $decodedString.Split(" ")
-            foreach ($string in $strings) {
-                $processStdIn = $process.StandardInput
-                $processStdIn.WriteLine($string)
-            }
+            $processStdIn = $process.StandardInput
+            $processStdIn.WriteLine($decodedString)
         }
     }
 
@@ -912,7 +902,7 @@ Send-StringsToProcess -StringsToSend $arguments -ProcessId $pid
                       script " " pid " " (mapconcat 'identity encoded-args " "))))
     (async-start-process "powershell" "powershell" nil cmd)))
 
-(defun my/eval-region-to-powershell (orig-fun &rest args)
+(defun psrepl/eval-region-to-powershell (orig-fun &rest args)
   "Advice function to modify behavior of `eval/send-region-to-repl'.
 
    This function intercepts the call to `eval/send-region-to-repl' and
@@ -947,5 +937,5 @@ Send-StringsToProcess -StringsToSend $arguments -ProcessId $pid
 
 (global-set-key (kbd "C-c C-o") #'psrepl/open-current-file)
 (global-set-key (kbd "C-c C-b") #'psrepl/set-breakpoint-here)
-
+(advice-add 'eval/send-region-to-repl :around #'psrepl/eval-region-to-powershell)
 #+end_src

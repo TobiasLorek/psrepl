@@ -15,11 +15,8 @@ function Send-StringsToProcess {
     Process {
         foreach ($stringToSend in $StringsToSend) {
             $decodedString = [System.Text.Encoding]::Unicode.GetString([System.Convert]::FromBase64String($stringToSend))
-            $strings = $decodedString.Split(" ")
-            foreach ($string in $strings) {
-                $processStdIn = $process.StandardInput
-                $processStdIn.WriteLine($string)
-            }
+            $processStdIn = $process.StandardInput
+            $processStdIn.WriteLine($decodedString)
         }
     }
 

@@ -12,7 +12,7 @@
                       script " " pid " " (mapconcat 'identity encoded-args " "))))
     (async-start-process "powershell" "powershell" nil cmd)))
 
-(defun my/eval-region-to-powershell (orig-fun &rest args)
+(defun psrepl/eval-region-to-powershell (orig-fun &rest args)
   "Advice function to modify behavior of `eval/send-region-to-repl'.
 
    This function intercepts the call to `eval/send-region-to-repl' and
@@ -47,3 +47,4 @@
 
 (global-set-key (kbd "C-c C-o") #'psrepl/open-current-file)
 (global-set-key (kbd "C-c C-b") #'psrepl/set-breakpoint-here)
+(advice-add 'eval/send-region-to-repl :around #'psrepl/eval-region-to-powershell)
