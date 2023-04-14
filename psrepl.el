@@ -1,8 +1,15 @@
+(defun psrepl/set-pid (pid)
+  "Set PID as the psrepl process ID."
+  (setq psrepl/pid))
+
 (defun psrepl/send-to-powershell (args)
-  "Invoke a PowerShell script asynchronously, passing ARGS as arguments."
-  (let* ((script "path/to/WriteToPsRepl.ps1")
-         (cmd (format "powershell.exe -File \"%s\" %s" script
-                      (mapconcat 'identity args " "))))
+  "Invoke a PowerShell script asynchronously, passing ARGS as arguments.
+   Arguments are encoded using base64."
+  (let* ((script ".\\WriteToPsRepl.ps1")
+         (pid (format "%d" psrepl/pid))
+         (encoded-args (mapcar (lambda (arg) (base64-encode-string arg 't)) args))
+         (cmd (concat "powershell.exe -ExecutionPolicy Bypass -File "
+                      script " " pid " " (mapconcat 'identity encoded-args " "))))
     (async-start-process "powershell" "powershell" nil cmd)))
 
 (defun my/eval-region-to-powershell (orig-fun &rest args)

@@ -9,18 +9,17 @@ function Send-StringsToProcess {
     )
 
     Begin {
-        $psi = New-Object System.Diagnostics.ProcessStartInfo
-        $psi.FileName = "powershell.exe"
-        $psi.RedirectStandardInput = $true
-        $psi.UseShellExecute = $false
         $process = [System.Diagnostics.Process]::GetProcessById($ProcessId)
     }
 
     Process {
-        $strings = $StringsToSend[0].Split(" ")
-        foreach ($string in $strings) {
-            $processStdIn = $process.StandardInput
-            $processStdIn.WriteLine($string)
+        foreach ($stringToSend in $StringsToSend) {
+            $decodedString = [System.Text.Encoding]::Unicode.GetString([System.Convert]::FromBase64String($stringToSend))
+            $strings = $decodedString.Split(" ")
+            foreach ($string in $strings) {
+                $processStdIn = $process.StandardInput
+                $processStdIn.WriteLine($string)
+            }
         }
     }
 
@@ -29,3 +28,7 @@ function Send-StringsToProcess {
         $processStdIn.Dispose()
     }
 }
+
+$arguments = [System.Environment]::GetCommandLineArgs()
+$arguments = $arguments[1..($arguments.Length - 1)]
+Send-StringsToProcess -StringsToSend $arguments -ProcessId $pid

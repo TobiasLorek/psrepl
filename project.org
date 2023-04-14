@@ -10,7 +10,8 @@ The aim of this project is to setup functionality to let emacs interact with pow
 5. To write  a pure elisp plugin.
 6. To be completely selfcontained. It is ok if some manual tweaking is required every time you run it.
 
-* Sending lines to a running powershell process in windows terminal
+* First Iteration
+** Sending lines to a running powershell process in windows terminal
 I am hoping this is possible using powershell, so lets ask the AI to write it for us.
 
 #+begin_src markdown
@@ -130,7 +131,7 @@ Note that the same caveat applies as before regarding the other PowerShell proce
 
 Well that does look promising but I think it will require some tweaking to get it working.
 
-#+begin_src powershell :tangle WriteToPsRepl.ps1
+#+begin_src powershell
 function Send-StringsToProcess {
     [CmdletBinding()]
     param(
@@ -164,7 +165,7 @@ function Send-StringsToProcess {
 }
 #+end_src
 
-* Use `eval/send-reigon-to-repl` to send text to a WT Powershell repl
+** Use `eval/send-reigon-to-repl` to send text to a WT Powershell repl
 Ok, next up we need to send it some data. But first I think we need to store the PID somewhere.
 
 #+begin_src markdown
@@ -177,7 +178,7 @@ Ok, next up we need to send it some data. But first I think we need to store the
 ```elisp
 (defun psrepl/set-pid (pid)
   "Set PID as the psrepl process ID."
-  (setq psrepl/pid pid))
+  (setq psrepl/pid))
 ```
 
 This function takes one argument `pid` and sets it as the value of the variable `psrepl/pid`. You can call this function from other functions to store the value of PID, making it easily accessible for other parts of your code.
@@ -260,7 +261,7 @@ This will modify the behavior of the `eval/send-region-to-repl` function to beha
 
 Ok, It looks like we are almost there! all in about 30 minutes using ChatGPT
 
-* Working with scripts. Setting breakpoints and inclusing them
+** Working with scripts. Setting breakpoints and inclusing them
 Ok, so next up it setting breakpoints and including the script source. This should be fairly straight forward. For the break point we need the current line and the script name. Then we just send the string "Set-PSBreakPoint -Line 'current line' -Script 'current file'"
 Including the file is even simpler. Just send the string ". path-to-script.ps"
 
@@ -342,12 +343,10 @@ This binds the `psrepl/open-current-file` function to the `C-c C-o` keybinding, 
 
 #+end_src
 
-
-* Putting it all together
+** Putting it all together
 Ok, so it looks like we got a pretty solid start for a script here minor plugin here. Putting it all together,
 
-
-#+begin_src elisp :tangle psrepl.el
+#+begin_src elisp
 (defun psrepl/send-to-powershell (args)
   "Invoke a PowerShell script asynchronously, passing ARGS as arguments."
   (let* ((script "path/to/WriteToPsRepl.ps1")
@@ -390,4 +389,563 @@ Ok, so it looks like we got a pretty solid start for a script here minor plugin 
 
 (global-set-key (kbd "C-c C-o") #'psrepl/open-current-file)
 (global-set-key (kbd "C-c C-b") #'psrepl/set-breakpoint-here)
+#+end_src
+* Second iteration.
+Now, there are some obvious errors in the powershell script and, honestly, I dont really know elisp at all. So next up, before trying to wrap my head agains the elisp debugger. I think we should ask ChatGPT to review its code.#
+
+** Powershell Review
+#+begin_src markdown
+[SYS]: You are a senior powershell developer
+
+[ME]: Hi! Please review the following code bellow, give a detailed explenation for each part and comment any bugs or incorrect parts.
+```powershell
+function Send-StringsToProcess {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true, Position = 0, ValueFromPipeline = $true)]
+        [string[]]$StringsToSend,
+
+        [Parameter(Mandatory = $true, Position = 1)]
+        [int]$ProcessId
+    )
+
+    Begin {
+        $psi = New-Object System.Diagnostics.ProcessStartInfo
+        $psi.FileName = "powershell.exe"
+        $psi.RedirectStandardInput = $true
+        $psi.UseShellExecute = $false
+        $process = [System.Diagnostics.Process]::GetProcessById($ProcessId)
+    }
+
+    Process {
+        $strings = $StringsToSend[0].Split(" ")
+        foreach ($string in $strings) {
+            $processStdIn = $process.StandardInput
+            $processStdIn.WriteLine($string)
+        }
+    }
+
+    End {
+        $processStdIn.Close()
+        $processStdIn.Dispose()
+    }
+}
+```
+
+[AI]: This function is named `Send-StringsToProcess` and it sends an array of strings to a specified process ID's standard input channel.
+
+- `[CmdletBinding()]` specifies that the function is a cmdlet and can accept common parameters.
+- The function accepts two parameters:
+
+  - `$StringsToSend` is an array of strings that are sent to the process.
+  - `$ProcessId` is the ID of the process that will receive the strings.
+
+- `Begin` block creates a new process start info object and sets properties:
+
+  - `$psi.FileName` specifies the name of the executable file that will be run when opening the process.
+  - `$psi.RedirectStandardInput` sets it to true so that input comes from the StandardInput stream.
+  - `$psi.UseShellExecute` is set to false, meaning that the command will be executed through the Win32 API, without the use of a shell.
+
+- `$process` is set to the process with the `$ProcessId`, retrieved using the `GetProcessById` method from the `System.Diagnostics.Process` class.
+
+- `Process` block splits the first element of `$StringsToSend` into an array of strings, then iterates through each string in the array and sends it to the process's standard input channel using `WriteLine` method.
+
+- `End` block is responsible for closing and disposing of the standard input channel.
+
+There are no major issues with the code, however, `$StringsToSend[0]` may not be what was intended, as it only sends the first element of the input string array. Also, it might be useful to add some error handling if the process cannot be found by the specified ID or if the standard input channel cannot be accessed.
+
+[ME]: 
+#+end_src
+
+Ok. I expected it to give some comment about the entierly redundant =$psi= variable. Thats not super encouraging. It is correct about that weired indexing, but its not super useful.
+
+** Elisp Review
+Lets ask for a review of the elisp module we produced
+
+#+begin_src markdown
+[SYS]: You are an expert elisp developer
+
+[ME]: Hi. Explain the following elisp code line by line and point out any errors.
+```elisp
+
+(defun psrepl/send-to-powershell (args)
+  "Invoke a PowerShell script asynchronously, passing ARGS as arguments."
+  (let* ((script "path/to/WriteToPsRepl.ps1")
+         (cmd (format "powershell.exe -File \"%s\" %s" script
+                      (mapconcat 'identity args " "))))
+    (async-start-process "powershell" "powershell" nil cmd)))
+
+(defun my/eval-region-to-powershell (orig-fun &rest args)
+  "Advice function to modify behavior of `eval/send-region-to-repl'.
+
+   This function intercepts the call to `eval/send-region-to-repl' and
+   modifies its behavior to send the lines as a list of strings to the
+   function `psrepl/send-to-powershell' only when the major mode is
+   `powershell-mode'. Otherwise, it delegates to the original function."
+  (if (eq major-mode 'powershell-mode)
+      (let ((region-str (buffer-substring-no-properties
+                         (region-beginning) (region-end))))
+        (psrepl/send-to-powershell (split-string region-str "\n")))
+    (apply orig-fun args)))
+
+(defun psrepl/set-breakpoint (linenum filename)
+  "Sets a breakpoint at LINENUM in FILENAME using `Set-PSBreakpoint` cmdlet."
+  (psrepl/send-to-powershell
+   (list (format "Set-PSBreakpoint -Line %d -Script \"%s\"" linenum filename))))
+
+(defun psrepl/set-breakpoint-here ()
+  "Sets a breakpoint at the current cursor position in the current buffer using `Set-PSBreakpoint` cmdlet."
+  (interactive)
+  (let ((linenum (line-number-at-pos))
+        (filename (buffer-file-name)))
+    (when filename
+      (psrepl/set-breakpoint linenum filename))))
+
+(defun psrepl/open-current-file ()
+  "Opens the current file in the PowerShell REPL using `.` operator."
+  (interactive)
+  (let ((filename (buffer-file-name)))
+    (when filename
+      (psrepl/send-to-powershell (list (concat ". \"" filename "\""))))))
+
+(global-set-key (kbd "C-c C-o") #'psrepl/open-current-file)
+(global-set-key (kbd "C-c C-b") #'psrepl/set-breakpoint-here)
+```
+
+[AI]: The code defines a few functions and sets keybindings to invoke them. Here's my line by line explanation, along with any errors I find:
+
+```elisp
+(defun psrepl/send-to-powershell (args)
+  "Invoke a PowerShell script asynchronously, passing ARGS as arguments."
+  (let* ((script "path/to/WriteToPsRepl.ps1")
+         (cmd (format "powershell.exe -File \"%s\" %s" script
+                      (mapconcat 'identity args " "))))
+    (async-start-process "powershell" "powershell" nil cmd)))
+```
+This function invokes a PowerShell script asynchronously. It takes `args` as an argument, which should be a list of strings. The script is hardcoded as `"path/to/WriteToPsRepl.ps1"`. The `format` function is used to construct the actual command that will be executed. It first sets `script` and then uses it to interpolate a call to `powershell.exe`, and the `mapconcat` function is used to join together the `args` list with spaces between them. The `async-start-process` function starts a new asynchronous process with the given command.
+
+I don't see any errors in this function.
+
+```elisp
+(defun my/eval-region-to-powershell (orig-fun &rest args)
+  "Advice function to modify behavior of `eval/send-region-to-repl'.
+
+   This function intercepts the call to `eval/send-region-to-repl' and
+   modifies its behavior to send the lines as a list of strings to the
+   function `psrepl/send-to-powershell' only when the major mode is
+   `powershell-mode'. Otherwise, it delegates to the original function."
+  (if (eq major-mode 'powershell-mode)
+      (let ((region-str (buffer-substring-no-properties
+                         (region-beginning) (region-end))))
+        (psrepl/send-to-powershell (split-string region-str "\n")))
+    (apply orig-fun args)))
+```
+
+This function is defined as an advice function for `eval/send-region-to-repl`. It takes `orig-fun` and `args` as arguments. The function checks the major mode and only sends the region to the PowerShell repl if the major mode is `powershell-mode`. It does this by using `buffer-substring-no-properties` to get the text in the region, splitting it into lines with `split-string`, and then passing the resulting list of strings to `psrepl/send-to-powershell`. If the major mode is not `powershell-mode`, it delegates to the original function with `apply`.
+
+I don't see any errors in this function.
+
+```elisp
+(defun psrepl/set-breakpoint (linenum filename)
+  "Sets a breakpoint at LINENUM in FILENAME using `Set-PSBreakpoint` cmdlet."
+  (psrepl/send-to-powershell
+   (list (format "Set-PSBreakpoint -Line %d -Script \"%s\"" linenum filename))))
+```
+
+This function sets a breakpoint at the specified `linenum` in the given `filename`. It calls `format` to construct a command that can set the desired breakpoint using `Set-PSBreakpoint`. It sends the constructed command to `psrepl/send-to-powershell` as a list of strings.
+
+I don't see any errors in this function.
+
+```elisp
+(defun psrepl/set-breakpoint-here ()
+  "Sets a breakpoint at the current cursor position in the current buffer using `Set-PSBreakpoint` cmdlet."
+  (interactive)
+  (let ((linenum (line-number-at-pos))
+        (filename (buffer-file-name)))
+    (when filename
+      (psrepl/set-breakpoint linenum filename))))
+```
+
+This function sets a breakpoint at the current cursor position in the current buffer by calling the `psrepl/set-breakpoint` function defined above. It does this by getting the current line number with `line-number-at-pos`, getting the current file name with `buffer-file-name`, and then calling `psrepl/set-breakpoint` with the obtained `linenum` and `filename`. It only calls `psrepl/set-breakpoint` if `filename` is non-nil.
+
+I don't see any errors in this function.
+
+```elisp
+(defun psrepl/open-current-file ()
+  "Opens the current file in the PowerShell REPL using `.` operator."
+  (interactive)
+  (let ((filename (buffer-file-name)))
+    (when filename
+      (psrepl/send-to-powershell (list (concat ". \"" filename "\""))))))
+```
+
+This function opens the current file in the PowerShell REPL using the `.` operator. It does this by calling `psrepl/send-to-powershell` with a command that concatenates `"."` with `filename` in quotes as a list of strings. It only calls `psrepl/send-to-powershell` if `filename` is non-nil.
+
+I don't see any errors in this function.
+
+```elisp
+(global-set-key (kbd "C-c C-o") #'psrepl/open-current-file)
+(global-set-key (kbd "C-c C-b") #'psrepl/set-breakpoint-here)
+```
+
+These lines bind the functions defined above to the key sequences `C-c C-o` and `C-c C-b`, respectively.
+
+I don't see any errors in these lines.
+
+[ME]: 
+#+end_src
+
+The only things that stands out here is that any quotation marks  in the lines sent to powershell will break the formatting in the elisp function. This should be solvable using some encoding scheme.
+
+#+begin_src markdown
+[SYS]: You are an expert software developer
+
+[ME]: Hi, how much does the size increase when you encode a string usign base64 encoding?
+
+[AI]: When you encode a string using base64 encoding, the resulting encoded string size will be approximately 33% larger than the original string size. This happens because base64 encoding converts every 3 bytes of input data into 4 bytes of output data. So, the encoded string will have more characters than the original string, but it will contain the same information. For instance, if the original string has 100 bytes, the base64-encoded string will be approximately 133 bytes.
+
+[ME]: 
+#+end_src
+
+Sounds acceptable
+
+#+begin_src markdown
+[SYS]: You are an expert software developer
+
+[ME]: Rewrite the following elisp function psrepl/send-to-powershell. It should encode the strings using base64 encodings before sending them to the powershell script
+```elisp
+(defun psrepl/send-to-powershell (args)
+  "Invoke a PowerShell script asynchronously, passing ARGS as arguments."
+  (let* ((script "path/to/WriteToPsRepl.ps1")
+         (cmd (format "powershell.exe -File \"%s\" %s" script
+                      (mapconcat 'identity args " "))))
+    (async-start-process "powershell" "powershell" nil cmd)))
+```
+
+[ME]:
+
+[AI]: Here's the rewritten function that encodes the arguments using base64 before sending them to the PowerShell script:
+
+```elisp
+(defun psrepl/send-to-powershell (args)
+  "Invoke a PowerShell script asynchronously, passing ARGS as arguments.
+   Arguments are encoded using base64."
+  (let* ((script "path/to/WriteToPsRepl.ps1")
+         (encoded-args (mapcar (lambda (arg) (base64-encode-string arg 't)) args))
+         (cmd (format "powershell.exe -ExecutionPolicy Bypass -EncodedCommand %s"
+                      (base64-encode-string (concat ". \"%s\" %s" script (mapconcat 'identity encoded-args " ")))))
+    (async-start-process "powershell" "powershell" nil cmd)))
+```
+The changes I made are:
+- Added a new variable `encoded-args` which is a list containing the base64-encoded versions of the original arguments.
+- Updated the `cmd` variable to include the `-EncodedCommand` switch instead of passing the arguments as plain text. The value of `-EncodedCommand` is a base64-encoded command that PowerShell can execute.
+- The base64-encoded command is created by concatenating the script path, the `encoded-args` list (joined with spaces), and wrapping the whole thing in quotes. This string is then passed to the `base64-encode-string` function.
+- I also added the `-ExecutionPolicy Bypass` option to bypass the execution policy in PowerShell to make sure the script is allowed to run.
+
+[ME]: Hu, dont use the -EncodedCommand flag, just pass the encoded strings as normal arguments
+
+[AI]: Sure, here's the updated function that encodes the arguments using base64 and passes them as individual arguments to the PowerShell script:
+
+```elisp
+(defun psrepl/send-to-powershell (args)
+  "Invoke a PowerShell script asynchronously, passing ARGS as arguments.
+   Arguments are encoded using base64."
+  (let* ((script "path/to/WriteToPsRepl.ps1")
+         (encoded-args (mapcar (lambda (arg) (base64-encode-string arg 't)) args))
+         (cmd (concat "powershell.exe -ExecutionPolicy Bypass -File "
+                      script " " (mapconcat 'identity encoded-args " "))))
+    (async-start-process "powershell" "powershell" nil cmd)))
+```
+
+The changes I made are:
+
+- Removed the use of `-EncodedCommand` switch and instead pass the encoded arguments as normal arguments to the Powershell script. 
+- Updated the `cmd` variable to include the encoded arguments as separate arguments to the script instead of concatenating them in a single string using `format` function. 
+- Passed the `-ExecutionPolicy Bypass` option to bypass the execution policy in PowerShell.
+
+[ME]: Ok, thats great, just a final change. The path to the script is ".\WriteToPsRepl.ps1" and as the first argument it should take an int called PID which can be picked up from psrepl/pid
+
+
+[AI]: Sure, here's the updated function that includes the changes you requested:
+
+```elisp
+(defun psrepl/send-to-powershell (args)
+  "Invoke a PowerShell script asynchronously, passing ARGS as arguments.
+   Arguments are encoded using base64."
+  (let* ((script ".\\WriteToPsRepl.ps1")
+         (pid (format "%d" psrepl/pid))
+         (encoded-args (mapcar (lambda (arg) (base64-encode-string arg 't)) args))
+         (cmd (concat "powershell.exe -ExecutionPolicy Bypass -File "
+                      script " " pid " " (mapconcat 'identity encoded-args " "))))
+    (async-start-process "powershell" "powershell" nil cmd)))
+```
+
+The changes I made are:
+
+- Updated the `script` variable to include the correct path to the PowerShell script.
+- Added a new variable `pid` that stores the value of `psrepl/pid` as a string.
+- Updated the `cmd` variable to include the `pid` variable as the first argument to the PowerShell script.
+- Passed the `-ExecutionPolicy Bypass` option to bypass the execution policy in PowerShell.
+
+[ME]: 
+#+end_src
+
+
+#+begin_src markdown
+
+[SYS]: You are an elite software developer
+
+[ME]: How do I write a powershell script which can be used as a command and pick up commandline arguments, i.e. How would i write the script "script.ps1" so that I can run it using `powershell.exe script.ps1 "Argument 1" "Argument 2"` and it should be able to take any number of arguments
+
+
+
+[AI]: To create a PowerShell script that accepts command-line arguments, you can use the special variable `$args`. This variable contains an array of all the arguments passed to the script.
+
+Here is an example script that prints out all the arguments:
+
+```powershell
+# script.ps1
+
+foreach ($arg in $args) {
+    Write-Output $arg
+}
+```
+
+You can run this script in PowerShell by passing in any number of arguments:
+
+```
+powershell.exe script.ps1 "Argument 1" "Argument 2" "Argument 3"
+```
+
+This will output:
+
+```
+Argument 1
+Argument 2
+Argument 3
+```
+
+You can then modify the script to perform whatever actions you want with the arguments passed in.
+
+[ME]: Ok cool
+Now modify the following script so that it uses any number of parameters passed from the command line, i.e. "powershell.exe WriteToPSRepl.ps1 arg1 arg2 arg2" further. also, this time the arguments will be base64 encoded and needs to be decoded again before being passed to the console.
+WriteToPSRepl.ps1
+```powershell
+function Send-StringsToProcess {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true, Position = 0, ValueFromPipeline = $true)]
+        [string[]]$StringsToSend,
+
+        [Parameter(Mandatory = $true, Position = 1)]
+        [int]$ProcessId
+    )
+
+    Begin {
+        $psi = New-Object System.Diagnostics.ProcessStartInfo
+        $psi.FileName = "powershell.exe"
+        $psi.RedirectStandardInput = $true
+        $psi.UseShellExecute = $false
+        $process = [System.Diagnostics.Process]::GetProcessById($ProcessId)
+    }
+
+    Process {
+        $strings = $StringsToSend[0].Split(" ")
+        foreach ($string in $strings) {
+            $processStdIn = $process.StandardInput
+            $processStdIn.WriteLine($string)
+        }
+    }
+
+    End {
+        $processStdIn.Close()
+        $processStdIn.Dispose()
+    }
+}
+```
+
+[AI]: Sure, here's a modified version of the `WriteToPSRepl.ps1` script that decodes the base64-encoded arguments and sends them to a PowerShell process:
+
+```powershell
+function Send-StringsToProcess {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true, Position = 0, ValueFromPipeline = $true)]
+        [string[]]$StringsToSend,
+
+        [Parameter(Mandatory = $true, Position = 1)]
+        [int]$ProcessId
+    )
+
+    Begin {
+        $psi = New-Object System.Diagnostics.ProcessStartInfo
+        $psi.FileName = "powershell.exe"
+        $psi.RedirectStandardInput = $true
+        $psi.UseShellExecute = $false
+        $process = [System.Diagnostics.Process]::GetProcessById($ProcessId)
+    }
+
+    Process {
+        foreach ($stringToSend in $StringsToSend) {
+            $decodedString = [System.Text.Encoding]::Unicode.GetString([System.Convert]::FromBase64String($stringToSend))
+            $strings = $decodedString.Split(" ")
+            foreach ($string in $strings) {
+                $processStdIn = $process.StandardInput
+                $processStdIn.WriteLine($string)
+            }
+        }
+    }
+
+    End {
+        $processStdIn.Close()
+        $processStdIn.Dispose()
+    }
+}
+
+$arguments = [System.Environment]::GetCommandLineArgs()
+$arguments = $arguments[1..($arguments.Length - 1)]
+Send-StringsToProcess -StringsToSend $arguments -ProcessId $pid
+```
+
+This modified version reads the command-line arguments using `[System.Environment]::GetCommandLineArgs()`, excluding the script name by indexing the array with `[1..($arguments.Length - 1)]`. This array of arguments is then passed to the `Send-StringsToProcess` function.
+
+Inside the `Send-StringsToProcess` function, each encoded string is first decoded using the `FromBase64String` method of the `System.Convert` class. The decoded string is then split into an array of space-separated strings and sent to the PowerShell process using the `WriteLine` method of the `StandardInput` property.
+
+[ME]: Thanks! But it seems to me that the $psi variable is useless, why is it included?
+
+[AI]: You are correct, the `$psi` variable is not used in this script and can be safely removed without affecting its functionality. It looks like it was left over from an earlier version of the script where it was probably used to set additional process start options. Thank you for identifying this unnecessary variable, and here is the updated script without it:
+
+```powershell
+function Send-StringsToProcess {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true, Position = 0, ValueFromPipeline = $true)]
+        [string[]]$StringsToSend,
+
+        [Parameter(Mandatory = $true, Position = 1)]
+        [int]$ProcessId
+    )
+
+    Begin {
+        $process = [System.Diagnostics.Process]::GetProcessById($ProcessId)
+    }
+
+    Process {
+        foreach ($stringToSend in $StringsToSend) {
+            $decodedString = [System.Text.Encoding]::Unicode.GetString([System.Convert]::FromBase64String($stringToSend))
+            $strings = $decodedString.Split(" ")
+            foreach ($string in $strings) {
+                $processStdIn = $process.StandardInput
+                $processStdIn.WriteLine($string)
+            }
+        }
+    }
+
+    End {
+        $processStdIn.Close()
+        $processStdIn.Dispose()
+    }
+}
+
+$arguments = [System.Environment]::GetCommandLineArgs()
+$arguments = $arguments[1..($arguments.Length - 1)]
+Send-StringsToProcess -StringsToSend $arguments -ProcessId $pid
+``` 
+
+I apologize for any confusion caused by the unnecessary variable, and thank you for bringing it to my attention.
+
+[ME]: 
+#+end_src
+
+Ok, I have to say i feel rather content. There has been some back and forth, but all in all its been a bliss, no digging through documentation that I dont understand or any of that. Time to see if it actually works:)
+
+#+begin_src powershell :tangle WriteToPsRepl.ps1
+function Send-StringsToProcess {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true, Position = 0, ValueFromPipeline = $true)]
+        [string[]]$StringsToSend,
+
+        [Parameter(Mandatory = $true, Position = 1)]
+        [int]$ProcessId
+    )
+
+    Begin {
+        $process = [System.Diagnostics.Process]::GetProcessById($ProcessId)
+    }
+
+    Process {
+        foreach ($stringToSend in $StringsToSend) {
+            $decodedString = [System.Text.Encoding]::Unicode.GetString([System.Convert]::FromBase64String($stringToSend))
+            $strings = $decodedString.Split(" ")
+            foreach ($string in $strings) {
+                $processStdIn = $process.StandardInput
+                $processStdIn.WriteLine($string)
+            }
+        }
+    }
+
+    End {
+        $processStdIn.Close()
+        $processStdIn.Dispose()
+    }
+}
+
+$arguments = [System.Environment]::GetCommandLineArgs()
+$arguments = $arguments[1..($arguments.Length - 1)]
+Send-StringsToProcess -StringsToSend $arguments -ProcessId $pid
+#+end_src
+
+
+#+begin_src elisp :tangle psrepl.el
+(defun psrepl/set-pid (pid)
+  "Set PID as the psrepl process ID."
+  (setq psrepl/pid))
+
+(defun psrepl/send-to-powershell (args)
+  "Invoke a PowerShell script asynchronously, passing ARGS as arguments.
+   Arguments are encoded using base64."
+  (let* ((script ".\\WriteToPsRepl.ps1")
+         (pid (format "%d" psrepl/pid))
+         (encoded-args (mapcar (lambda (arg) (base64-encode-string arg 't)) args))
+         (cmd (concat "powershell.exe -ExecutionPolicy Bypass -File "
+                      script " " pid " " (mapconcat 'identity encoded-args " "))))
+    (async-start-process "powershell" "powershell" nil cmd)))
+
+(defun my/eval-region-to-powershell (orig-fun &rest args)
+  "Advice function to modify behavior of `eval/send-region-to-repl'.
+
+   This function intercepts the call to `eval/send-region-to-repl' and
+   modifies its behavior to send the lines as a list of strings to the
+   function `psrepl/send-to-powershell' only when the major mode is
+   `powershell-mode'. Otherwise, it delegates to the original function."
+  (if (eq major-mode 'powershell-mode)
+      (let ((region-str (buffer-substring-no-properties
+                         (region-beginning) (region-end))))
+        (psrepl/send-to-powershell (split-string region-str "\n")))
+    (apply orig-fun args)))
+
+(defun psrepl/set-breakpoint (linenum filename)
+  "Sets a breakpoint at LINENUM in FILENAME using `Set-PSBreakpoint` cmdlet."
+  (psrepl/send-to-powershell
+   (list (format "Set-PSBreakpoint -Line %d -Script \"%s\"" linenum filename))))
+
+(defun psrepl/set-breakpoint-here ()
+  "Sets a breakpoint at the current cursor position in the current buffer using `Set-PSBreakpoint` cmdlet."
+  (interactive)
+  (let ((linenum (line-number-at-pos))
+        (filename (buffer-file-name)))
+    (when filename
+      (psrepl/set-breakpoint linenum filename))))
+
+(defun psrepl/open-current-file ()
+  "Opens the current file in the PowerShell REPL using `.` operator."
+  (interactive)
+  (let ((filename (buffer-file-name)))
+    (when filename
+      (psrepl/send-to-powershell (list (concat ". \"" filename "\""))))))
+
+(global-set-key (kbd "C-c C-o") #'psrepl/open-current-file)
+(global-set-key (kbd "C-c C-b") #'psrepl/set-breakpoint-here)
+
 #+end_src
