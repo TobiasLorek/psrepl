@@ -394,7 +394,7 @@ Ok, so it looks like we got a pretty solid start for a script here minor plugin 
 Now, there are some obvious errors in the powershell script and, honestly, I dont really know elisp at all. So next up, before trying to wrap my head agains the elisp debugger. I think we should ask ChatGPT to review its code.#
 
 ** Powershell Review
-#+begin_ai
+#+begin_src markdown
 [SYS]: You are a senior powershell developer
 
 [ME]: Hi! Please review the following code bellow, give a detailed explenation for each part and comment any bugs or incorrect parts.
@@ -455,14 +455,14 @@ function Send-StringsToProcess {
 There are no major issues with the code, however, `$StringsToSend[0]` may not be what was intended, as it only sends the first element of the input string array. Also, it might be useful to add some error handling if the process cannot be found by the specified ID or if the standard input channel cannot be accessed.
 
 [ME]: 
-#+end_ai
+#+end_src
 
 Ok. I expected it to give some comment about the entierly redundant =$psi= variable. Thats not super encouraging. It is correct about that weired indexing, but its not super useful.
 
 ** Elisp Review
 Lets ask for a review of the elisp module we produced
 
-#+begin_ai
+#+begin_src markdown
 [SYS]: You are an expert elisp developer
 
 [ME]: Hi. Explain the following elisp code line by line and point out any errors.
@@ -593,11 +593,11 @@ These lines bind the functions defined above to the key sequences `C-c C-o` and 
 I don't see any errors in these lines.
 
 [ME]: 
-#+end_ai
+#+end_src
 
 The only things that stands out here is that any quotation marks  in the lines sent to powershell will break the formatting in the elisp function. This should be solvable using some encoding scheme.
 
-#+begin_ai
+#+begin_src markdown
 [SYS]: You are an expert software developer
 
 [ME]: Hi, how much does the size increase when you encode a string usign base64 encoding?
@@ -605,11 +605,11 @@ The only things that stands out here is that any quotation marks  in the lines s
 [AI]: When you encode a string using base64 encoding, the resulting encoded string size will be approximately 33% larger than the original string size. This happens because base64 encoding converts every 3 bytes of input data into 4 bytes of output data. So, the encoded string will have more characters than the original string, but it will contain the same information. For instance, if the original string has 100 bytes, the base64-encoded string will be approximately 133 bytes.
 
 [ME]: 
-#+end_ai
+#+end_src
 
 Sounds acceptable
 
-#+begin_ai
+#+begin_src markdown
 [SYS]: You are an expert software developer
 
 [ME]: Rewrite the following elisp function psrepl/send-to-powershell. It should encode the strings using base64 encodings before sending them to the powershell script
@@ -688,10 +688,10 @@ The changes I made are:
 - Passed the `-ExecutionPolicy Bypass` option to bypass the execution policy in PowerShell.
 
 [ME]: 
-#+end_ai
+#+end_src
 
 
-#+begin_ai
+#+begin_src markdown
 
 [SYS]: You are an elite software developer
 
@@ -850,7 +850,7 @@ function Send-StringsToProcess {
 This modified version simply sends the decoded string as a whole to the PowerShell process using `WriteLine`.
 
 [ME]: 
-#+end_ai
+#+end_src
 
 #+begin_src powershell :tangle WriteToPsRepl.ps1
 function Send-StringsToProcess {
