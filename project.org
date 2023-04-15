@@ -14,6 +14,9 @@ The aim of this project is to setup functionality to let emacs interact with pow
 ** Sending lines to a running powershell process in windows terminal
 I am hoping this is possible using powershell, so lets ask the AI to write it for us.
 
+*** First Attempt, Writing to the Stdin of the process  = Complete shit
+Ok, so the first powershell script looks sort of legit. But it just didn't work cause it did not support the use case I was going for. I've copied it bellow for reference.
+
 #+begin_src markdown
 [SYS]: You are a powershell developer
 
@@ -39,7 +42,7 @@ function Send-StringsToProcess {
         $psi.UseShellExecute = $false
         $process = [System.Diagnostics.Process]::GetProcessById($ProcessId)
     }
-    
+
     Process {
         foreach ($string in $StringsToSend) {
             $processStdIn = $process.StandardInput
@@ -95,7 +98,7 @@ function Send-StringsToProcess {
         $psi.UseShellExecute = $false
         $process = [System.Diagnostics.Process]::GetProcessById($ProcessId)
     }
-    
+
     Process {
         $strings = $StringsToSend[0].Split(" ")
         foreach ($string in $strings) {
@@ -115,7 +118,7 @@ This updated function accepts input from the pipeline and splits the strings on 
 
 `"Hello World" | Send-StringsToProcess -ProcessId <other PowerShell process Id>`
 
-This example sends the string "Hello World" to the other PowerShell process. 
+This example sends the string "Hello World" to the other PowerShell process.
 
 You can also use the `-StringsToSend` parameter as before:
 
@@ -123,7 +126,7 @@ You can also use the `-StringsToSend` parameter as before:
 Send-StringsToProcess -StringsToSend "Hello World" -ProcessId <other PowerShell process Id>
 ```
 
-This example also sends the string "Hello World" to the other PowerShell process. 
+This example also sends the string "Hello World" to the other PowerShell process.
 
 Note that the same caveat applies as before regarding the other PowerShell process needing to be running as an interactive console application.
 
@@ -164,6 +167,498 @@ function Send-StringsToProcess {
     }
 }
 #+end_src
+*** Second Attempt.
+Ok, I wasted a lot of time on the first attempt. So rather than just one way this time I will try to different approaches simultaneously
+**** First Idea; Use the console api to send data to the console.
+Lets give it a try:
+#+begin_ai
+[SYS]: You are an expert windows developer.
+
+[ME]: Write a powershell wich uses the Console API in kernel32.dll to attach to a running console and write an array of lines into its stdin.
+After its finished it should detach and free the console again.
+
+[AI]: Sure, here's an example PowerShell script that does what you're asking for:
+
+```powershell
+# Load the kernel32.dll library
+Add-Type -Name ConsoleAPI -Namespace Kernel32 -MemberDefinition @"
+[DllImport("kernel32.dll")]
+public static extern bool AttachConsole(uint dwProcessId);
+[DllImport("kernel32.dll")]
+public static extern bool FreeConsole();
+[DllImport("kernel32.dll")]
+public static extern bool SetConsoleCtrlHandler(IntPtr handlerRoutine, bool add);
+[DllImport("kernel32.dll")]
+public static extern bool WriteConsoleInput(IntPtr hConsoleInput, INPUT_RECORD[] lpBuffer, uint nLength, out uint lpNumberOfEventsWritten);
+public struct INPUT_RECORD {
+    public ushort EventType;
+    public KEY_EVENT_RECORD KeyEvent;
+}
+public struct KEY_EVENT_RECORD {
+    public bool bKeyDown;
+    public ushort wRepeatCount;
+    public ushort wVirtualKeyCode;
+    public ushort wVirtualScanCode;
+    public char UnicodeChar;
+    public uint dwControlKeyState;
+}
+"@
+
+# Attach to an existing console
+if (![Kernel32.ConsoleAPI]::AttachConsole(-1)) {
+    Write-Error "Failed to attach to console."
+    exit
+}
+
+# Create an array of lines to write to stdin
+$lines = @("Hello, world!", "How are you?", "Goodbye.")
+
+# Convert the lines to INPUT_RECORD structures
+$records = @()
+foreach ($line in $lines) {
+    $chars = [char[]]$line
+    foreach ($char in $chars) {
+        $record = New-Object Kernel32.INPUT_RECORD
+        $record.EventType = 1 # KEY_EVENT
+        $record.KeyEvent.bKeyDown = $true
+        $record.KeyEvent.UnicodeChar = $char
+        $records += $record
+
+        $record = New-Object Kernel32.INPUT_RECORD
+        $record.EventType = 1 # KEY_EVENT
+        $record.KeyEvent.bKeyDown = $false
+        $record.KeyEvent.UnicodeChar = $char
+        $records += $record
+    }
+    $record = New-Object Kernel32.INPUT_RECORD
+    $record.EventType = 1 # KEY_EVENT
+    $record.KeyEvent.bKeyDown = $true
+    $record.KeyEvent.wVirtualKeyCode = 13 # Enter
+    $records += $record
+
+    $record = New-Object Kernel32.INPUT_RECORD
+    $record.EventType = 1 # KEY_EVENT
+    $record.KeyEvent.bKeyDown = $false
+    $record.KeyEvent.wVirtualKeyCode = 13 # Enter
+    $records += $record
+}
+
+# Write the INPUT_RECORD structures to stdin
+$numWritten = 0
+if (![Kernel32.ConsoleAPI]::WriteConsoleInput([System.IntPtr]::Zero, $records, $records.Length, [ref]$numWritten)) {
+    Write-Error "Failed to write to console input."
+}
+
+# Detach from the console and free resources
+[Kernel32.ConsoleAPI]::FreeConsole()
+```
+
+This script first loads the kernel32.dll library into PowerShell and defines a structure for the `INPUT_RECORD` and `KEY_EVENT_RECORD` types. It then attaches to an existing console using the `AttachConsole` API function, creates an array of lines to write to stdin, and converts them to `INPUT_RECORD` structures using the `KEY_EVENT_RECORD` info. Finally, it writes the structures to stdin using the `WriteConsoleInput` API function and detaches from the console using the `FreeConsole` API function.
+
+[ME]:
+#+end_ai
+
+Ok, thats not super impressive. There is a lot of errors there. Lets give it an other try and ask it to explain it self.
+
+#+begin_ai
+[SYS]: You are an expert windows developer.
+
+[ME]: Write a powershell wich uses the Console API in kernel32.dll to attach to a running console and write an array of lines into its stdin.
+The script should take a process id, called PID, and an array of strings as arguments
+After its finished it should detach and free the console again.
+Please comment every line and explain why it is needed.
+
+
+[AI]: Sure, here's a PowerShell script that uses the Console API in kernel32.dll to attach to a running console and write an array of lines into its stdin:
+
+```powershell
+# Load the Console API from kernel32.dll
+Add-Type -Name ConsoleApi -Namespace Win32 -MemberDefinition "
+[DllImport(\"kernel32.dll\")]
+public static extern bool AttachConsole(int dwProcessId);
+[DllImport(\"kernel32.dll\", SetLastError = true, CharSet = CharSet.Auto)]
+public static extern IntPtr GetStdHandle(int nStdHandle);
+[DllImport(\"kernel32.dll\", SetLastError = true)]
+public static extern bool WriteConsole(IntPtr hConsoleOutput, string lpBuffer, uint nNumberOfCharsToWrite, out uint lpNumberOfCharsWritten, IntPtr lpReserved);
+[DllImport(\"kernel32.dll\", SetLastError = true)]
+public static extern bool FreeConsole();
+"
+
+# Get the process id and array of strings from the command line arguments
+$pid = [int]$args[0]
+$lines = $args[1..$($args.Count-1)]
+
+# Attach to the console of the specified process
+$consoleAttached = [Win32.ConsoleApi]::AttachConsole($pid)
+
+if ($consoleAttached) {
+    try {
+        # Get the handle for the console's standard input
+        $hStdIn = [Win32.ConsoleApi]::GetStdHandle(-10) # -10 = STD_INPUT_HANDLE
+
+        if ($hStdIn -ne [System.IntPtr]::Zero) {
+            # Write each line to the console's standard input
+            foreach ($line in $lines) {
+                [uint]$written = 0
+                [Win32.ConsoleApi]::WriteConsole($hStdIn, $line, $line.Length, [ref]$written, [System.IntPtr]::Zero)
+            }
+        }
+    } finally {
+        # Detach from the console and free the console resources
+        [void][Win32.ConsoleApi]::FreeConsole()
+    }
+} else {
+    Write-Error "Failed to attach to console for process with id $pid"
+}
+```
+
+Here's an explanation of what each line does:
+
+- `Add-Type -Name ConsoleApi -Namespace Win32 -MemberDefinition "..."`: Loads the Console API from kernel32.dll into a new .NET type called `ConsoleApi` in the `Win32` namespace.
+- `$pid = [int]$args[0]`: Gets the process id from the first command line argument and casts it to an integer.
+- `$lines = $args[1..$($args.Count-1)]`: Gets an array of strings from the remaining command line arguments.
+- `$consoleAttached = [Win32.ConsoleApi]::AttachConsole($pid)`: Attaches to the console of the specified process using the `AttachConsole` function from the Console API.
+- `if ($consoleAttached) { ... }`: Checks if the console was successfully attached before proceeding.
+- `$hStdIn = [Win32.ConsoleApi]::GetStdHandle(-10)`: Gets the handle for the console's standard input using the `GetStdHandle` function from the Console API and passing in the constant value `-10` to indicate the standard input handle.
+- `if ($hStdIn -ne [System.IntPtr]::Zero) { ... }`: Checks if the standard input handle was successfully obtained before proceeding.
+- `foreach ($line in $lines) { ... }`: Loops through each line of input and writes it to the console's standard input using the `WriteConsole` function from the Console API.
+- `[void][Win32.ConsoleApi]::FreeConsole()`: Detaches from the console and frees the console resources using the `FreeConsole` function from the Console API.
+- `Write-Error "Failed to attach to console for process with id $pid"`: Displays an error message if attaching to the console fails.
+
+[ME]: 
+#+end_ai
+
+#+begin_src csharp :tangle WriteToConsole.ps1
+# Load the Console API from kernel32.dll
+Add-Type -Name ConsoleApi -Namespace Win32 -MemberDefinition "
+[DllImport(\"kernel32.dll\")]
+public static extern bool AttachConsole(int dwProcessId);
+[DllImport(\"kernel32.dll\", SetLastError = true, CharSet = CharSet.Auto)]
+public static extern IntPtr GetStdHandle(int nStdHandle);
+[DllImport(\"kernel32.dll\", SetLastError = true)]
+public static extern bool WriteConsole(IntPtr hConsoleOutput, string lpBuffer, uint nNumberOfCharsToWrite, out uint lpNumberOfCharsWritten, IntPtr lpReserved);
+[DllImport(\"kernel32.dll\", SetLastError = true)]
+public static extern bool FreeConsole();
+"
+
+# Get the process id and array of strings from the command line arguments
+$pid = [int]$args[0]
+$lines = $args[1..$($args.Count-1)]
+
+# Attach to the console of the specified process
+$consoleAttached = [Win32.ConsoleApi]::AttachConsole($pid)
+
+if ($consoleAttached) {
+    try {
+        # Get the handle for the console's standard input
+        $hStdIn = [Win32.ConsoleApi]::GetStdHandle(-10) # -10 = STD_INPUT_HANDLE
+
+        if ($hStdIn -ne [System.IntPtr]::Zero) {
+            # Write each line to the console's standard input
+            foreach ($line in $lines) {
+                [uint]$written = 0
+                [Win32.ConsoleApi]::WriteConsole($hStdIn, $line, $line.Length, [ref]$written, [System.IntPtr]::Zero)
+            }
+        }
+    } finally {
+        # Detach from the console and free the console resources
+        [void][Win32.ConsoleApi]::FreeConsole()
+    }
+} else {
+    Write-Error "Failed to attach to console for process with id $pid"
+}
+#+end_src
+
+Hum, Well that might be something! I don't really know since I'm writing this on my own computer running linux and testing...
+
+**** Second Idea; Use clipboard to pass data between applications
+Ok, an other idea, have Powershell  bring a window into the foreground and tell send the Ctrl+V keys to it.
+#+begin_ai
+[SYS]: You are a powershell developer
+
+[ME]: Write me powershell function which sends the Ctrl+V keys to a particular window in Microsoft Windows, the window should be identifed by a handler which has been passed as an argument to the function.
+Comment every line and explain what it does.
+
+[AI]: Sure, here's a PowerShell function that sends the Ctrl+V keys to a particular window identified by its handler:
+
+```
+function Send-CtrlVKeysToWindow([IntPtr]$handle)
+{
+    # Get the process ID associated with the window handle
+    $processID = (Get-Process -Id $handle.ToInt32()).Id
+
+    # Get the target process by ID
+    $process = [System.Diagnostics.Process]::GetProcessById($processID)
+
+    # Get the handle of the target window
+    $targetWindow = $process.MainWindowHandle
+
+    # Set the target window to be the active window
+    [System.Windows.Forms.SendKeys]::SendWait('%')
+    [System.Windows.Forms.SendKeys]::SendWait('#')
+    [System.Windows.Forms.SendKeys]::SendWait('{' + $targetWindow + '}')
+    Start-Sleep -Milliseconds 100
+
+    # Send the Ctrl+V keystrokes to the target window
+    [System.Windows.Forms.SendKeys]::SendWait('^v')
+}
+```
+
+Let me explain what each line does:
+
+```
+function Send-CtrlVKeysToWindow([IntPtr]$handle)
+```
+This declares a function called `Send-CtrlVKeysToWindow` that takes an `IntPtr` handle as an argument.
+
+```
+$processID = (Get-Process -Id $handle.ToInt32()).Id
+```
+This gets the process ID associated with the window handle that was passed in as an argument.
+
+```
+$process = [System.Diagnostics.Process]::GetProcessById($processID)
+```
+This gets the target process for the window by ID.
+
+```
+$targetWindow = $process.MainWindowHandle
+```
+This gets the handle of the target window.
+
+```
+[System.Windows.Forms.SendKeys]::SendWait('%')
+[System.Windows.Forms.SendKeys]::SendWait('#')
+[System.Windows.Forms.SendKeys]::SendWait('{' + $targetWindow + '}')
+Start-Sleep -Milliseconds 100
+```
+These lines set the target window to be the active window. The `SendWait` method of the `SendKeys` class is used to simulate key presses. `%` simulates the Alt key, and `#` simulates the Windows key. By sending `%#{"$targetWindow"}`, we're telling Windows to activate the window with the corresponding handle. The `Start-Sleep` command is included to allow time for the window to be activated.
+
+```
+[System.Windows.Forms.SendKeys]::SendWait('^v')
+```
+This sends the Ctrl+V keystrokes to the target window, which simulates pasting from the clipboard.
+
+Hope this helps!
+
+[ME]: Thats cool. But if possible I would like the window to remain in the background
+
+[AI]: Sure, I modified the previous code to send the Ctrl+V keys to the target window without activating it. Here's the updated code:
+
+```powershell
+function Send-CtrlVKeysToWindow([IntPtr]$handle)
+{
+    # Get the process ID associated with the window handle
+    $processID = (Get-Process -Id $handle.ToInt32()).Id
+
+    # Get the target process by ID
+    $process = [System.Diagnostics.Process]::GetProcessById($processID)
+
+    # Get the handle of the target window
+    $targetWindow = $process.MainWindowHandle
+
+    # Simulate a key down event for the Ctrl key
+    [System.Windows.Forms.SendKeys]::SendWait('{CTRLDOWN}')
+
+    # Simulate a key down event for the V key
+    [System.Windows.Forms.SendKeys]::SendWait('v')
+
+    # Simulate a key up event for the V key
+    [System.Windows.Forms.SendKeys]::SendWait('{CTRLUP}')
+}
+```
+
+Let me explain the key changes:
+```
+[System.Windows.Forms.SendKeys]::SendWait('{CTRLDOWN}')
+```
+This line simulates a key down event for the Ctrl key.
+
+```
+[System.Windows.Forms.SendKeys]::SendWait('v')
+```
+This line simulates a key press for the "V" key.
+
+```
+[System.Windows.Forms.SendKeys]::SendWait('{CTRLUP}')
+```
+This line simulates a key up event for the Ctrl key.
+
+By simulating a down event for the Ctrl key and then simulating the "V" key press and finally simulating the up event for the Ctrl key, the function simulates the Ctrl+V keystroke combination, resulting in a paste operation.
+
+Since no window activation is performed, the target window will remain in the background. I hope this helps.
+
+[ME]: But then the keys wont be sent that that window, will they? Is it possible to send keys to a window while it remains in the background?
+
+[AI]: You are correct, if the window is in the background, the keys may not be sent to it as the operating system won't route the input to a non-activated window.
+
+To send keystrokes to a window in the background, we can use the `SendMessage` function from the Windows API to send a keystroke message to the target window.
+
+Here's the modified code that will send Ctrl+V keystrokes to a window identified by its handler while keeping it in the background:
+
+```powershell
+Add-Type -TypeDefinition @"
+    using System;
+    using System.Runtime.InteropServices;
+    public class PInvokeHelper {
+        [DllImport("user32.dll")]
+        public static extern bool SendMessage(IntPtr hWnd, uint Msg, int wParam, int lParam);
+    }
+"@
+
+function Send-CtrlVKeysToWindow([IntPtr]$handle)
+{
+    # Get the window handle
+    $targetWindow = $handle
+
+    # Activate the target window to prepare it to receive the keystroke message
+    [PInvokeHelper]::SendMessage($targetWindow, 0x0100, 0x000D, 0)
+
+    # Simulate a key down message for the Ctrl key
+    [PInvokeHelper]::SendMessage($targetWindow, 0x0100, 0x0014, 0x001D0001)
+
+    # Simulate a key down message for the V key
+    [PInvokeHelper]::SendMessage($targetWindow, 0x0100, 0x0022, 0x002F0001)
+
+    # Simulate a key up message for the V key
+    [PInvokeHelper]::SendMessage($targetWindow, 0x0101, 0x0022, 0xC02F0001)
+
+    # Simulate a key up message for the Ctrl key
+    [PInvokeHelper]::SendMessage($targetWindow, 0x0101, 0x0014, 0xC01D0001)
+}
+```
+
+Let me explain what's changed here:
+
+```
+Add-Type -TypeDefinition @"
+    using System;
+    using System.Runtime.InteropServices;
+    public class PInvokeHelper {
+        [DllImport("user32.dll")]
+        public static extern bool SendMessage(IntPtr hWnd, uint Msg, int wParam, int lParam);
+    }
+"@
+```
+
+This code block uses the `Add-Type` cmdlet to compile and load a C# code snippet that defines the `SendMessage` function, which we'll use to send messages to the window.
+
+```
+# Get the window handle
+$targetWindow = $handle
+```
+
+This line gets the handle of the target window, passed in as an argument.
+
+```
+[PInvokeHelper]::SendMessage($targetWindow, 0x0100, 0x000D, 0)
+```
+
+This line sends a key down message to activate the window, by passing the `WM_KEYDOWN` message (0x0100) with `VK_RETURN` (0x000D) and 0 (lParam) parameters. This prepares the window to receive keystroke messages.
+
+```
+[PInvokeHelper]::SendMessage($targetWindow, 0x0100, 0x0014, 0x001D0001)
+```
+
+This line sends a key down message for the Ctrl key, by passing the `WM_KEYDOWN` message with `VK_CONTROL` (0x0014) and `EXTENDED` (0x1000000) flags. This informs the window that the Ctrl key is being held down.
+
+```
+[PInvokeHelper]::SendMessage($targetWindow, 0x0100, 0x0022, 0x002F0001)
+```
+
+This line sends a key down message for the V key, by passing the `WM_KEYDOWN` message with `VK_V` (0x0022) and `EXTENDED` (0x1000000) flags. This simulates the key press.
+
+```
+[PInvokeHelper]::SendMessage($targetWindow, 0x0101, 0x0022, 0xC02F0001)
+```
+
+This line sends a key up message for the V key, by passing the `WM_KEYUP` message (0x0101) with `VK_V` (0x0022) and the `KEYUP` (0xC0000000) flag. This lets go of the V key.
+
+```
+[PInvokeHelper]::SendMessage($targetWindow, 0x0101, 0x0014, 0xC01D0001)
+```
+
+This line sends a key up message for the Ctrl key, by passing the `WM_KEYUP` message with `VK_CONTROL` (0x0014) and the `KEYUP` (0xC0000000) flag. This lets go of the Ctrl key.
+
+With this function, you should be able to send keystrokes to a window while keeping it in the background.
+
+[ME]: 
+#+end_ai
+
+Hum, well I would be lying if I said i liked it. Lets hope the ConsoleApi  works!
+
+#+begin_src csharp :tangle SendCtrlV.ps1
+Add-Type -TypeDefinition @"
+    using System;
+    using System.Runtime.InteropServices;
+    public class PInvokeHelper {
+        [DllImport("user32.dll")]
+        public static extern bool SendMessage(IntPtr hWnd, uint Msg, int wParam, int lParam);
+    }
+"@
+
+function Send-CtrlVKeysToWindow([IntPtr]$handle)
+{
+    # Get the window handle
+    $targetWindow = $handle
+
+    # Activate the target window to prepare it to receive the keystroke message
+    [PInvokeHelper]::SendMessage($targetWindow, 0x0100, 0x000D, 0)
+
+    # Simulate a key down message for the Ctrl key
+    [PInvokeHelper]::SendMessage($targetWindow, 0x0100, 0x0014, 0x001D0001)
+
+    # Simulate a key down message for the V key
+    [PInvokeHelper]::SendMessage($targetWindow, 0x0100, 0x0022, 0x002F0001)
+
+    # Simulate a key up message for the V key
+    [PInvokeHelper]::SendMessage($targetWindow, 0x0101, 0x0022, 0xC02F0001)
+
+    # Simulate a key up message for the Ctrl key
+    [PInvokeHelper]::SendMessage($targetWindow, 0x0101, 0x0014, 0xC01D0001)
+}
+
+#+end_src
+**** Argument to powershell scrips
+Last time i never even got any of the arguments i wanted when running the powershell scripts. Lest see if we can fix that.
+
+#+begin_ai
+[SYS]: You are a software developer
+
+[ME]: Hi. Write me a powershell script called `echoAll.ps1` which, when run using "pwsh.exe -File echoAll.ps1 -args 'arg 1 asd' 'arg 2 line' 'arg 4 line'" outputs the lines one after each other. It should accept any number of lines
+
+[AI]: Sure, here's the script `echoAll.ps1` that will output the lines passed as arguments one after another:
+
+```
+Param(
+  [Parameter(Mandatory=$true, Position=0, ValueFromRemainingArguments=$true)]
+  [string[]]$lines
+)
+
+foreach($line in $lines){
+  Write-Output $line
+}
+```
+
+This script accepts any number of arguments as input, using the `ValueFromRemainingArguments` option to gather them all into a single parameter named `$lines`. Then, it simply loops through each of the lines and outputs it using the `Write-Output` cmdlet.
+
+You can run the script with the following command:
+
+```
+pwsh.exe -File echoAll.ps1 -args 'arg 1 asd' 'arg 2 line' 'arg 4 line'
+```
+
+The output will be:
+
+```
+arg 1 asd
+arg 2 line
+arg 4 line
+```
+
+[ME]: 
+#+end_ai
+
 
 ** Use `eval/send-region-to-repl` to send text to a WT Powershell repl
 Ok, next up we need to send it some data. But first I think we need to store the PID somewhere.
